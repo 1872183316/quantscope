@@ -107,7 +107,7 @@ def resolve(spec: str) -> list[Source]:
 
 def variant_of(name: str) -> str:
     """Groups the shards of one model file: strips -00001-of-00004 and the extension."""
-    return re.sub(r"(-\d{5}-of-\d{5})?\.(gguf|safetensors)$", "", name)
+    return re.sub(r"(-\d{5}-of-\d{5})?\.(gguf|safetensors|ninfer)$", "", name)
 
 
 # ---------------------------------------------------------------- GGUF -----------------------
@@ -221,28 +221,71 @@ def read_safetensors(src: Source, bits: int | None) -> list[dict]:
     return out
 
 
+# ---------------------------------------------------------------- NInfer v3 ------------------
+
+NINFER_MAGIC = b"NINFER" + bytes([0, 3])
+
+
+def read_ninfer(src: Source) -> list[dict]:
+    """Logical parameters of a NInfer v3 .ninfer entry, from its directory JSON only.
+
+    A stored object may hold several logical parameters (for example an expert bank); each
+    binding's share of the object's stored bytes is proportional to its element range.
+    """
+    head = src.read(0, 32)
+    magic, json_bytes, _artifact_id = struct.unpack("<8sQ16s", head)
+    if magic != NINFER_MAGIC:
+        raise ValueError(f"{src.name}: not a NInfer v3 entry")
+    directory = json.loads(src.read(32, json_bytes))
+    objects = {o["id"]: o for o in directory["objects"] if o.get("kind", "tensor") == "tensor"}
+    elements = {}
+    for oid, o in objects.items():
+        count = 1
+        for d in o["shape"]:
+            count *= d
+        elements[oid] = count
+    out = []
+    for name, binding in directory["bindings"].items():
+        parts = ([{"object": binding["object"], "range": [0, elements.get(binding["object"], 0)]}]
+                 if "object" in binding else binding.get("parts", []))
+        count = nbytes = 0
+        fmt = None
+        for part in parts:
+            o = objects.get(part["object"])
+            if o is None:
+                continue
+            n = part["range"][1] - part["range"][0]
+            count += n
+            nbytes += o["bytes"] * n / max(elements[part["object"]], 1)
+            fmt = o["format"]
+        if count:
+            out.append({"name": name, "type": (fmt or "?").upper(), "elements": count,
+                        "bytes": nbytes})
+    return out
+
+
 # ---------------------------------------------------------------- summary --------------------
 
 CATEGORIES = [
     ("norms", r"(norm)"),
-    ("hyper-connections", r"(hc_|hyper_connection)"),
+    ("hyper-connections", r"(hc_|_hc\.|hyper_connection)"),
     ("routed experts", r"(_exps\b|\.experts\.|experts\.\d+|block_sparse_moe\.experts)"),
-    ("shared experts", r"(_shexp|shared_expert)"),
-    ("router", r"(ffn_gate_inp|\.gate\.weight$|\.router\.)"),
+    ("shared experts", r"(_shexp|shared_expert|moe\.shared\.)"),
+    ("router", r"(ffn_gate_inp|\.gate\.weight$|\.router\b|shared_score)"),
     ("n-gram/per-layer embeddings", r"(ngram|per_layer|ple_|\.ple\.)"),
-    ("linear attn/SSM", r"(ssm_|linear_attn|mamba|conv1d)"),
+    ("linear attn/SSM", r"(ssm_|linear_attn|mamba|conv1d|\.gdn\.)"),
     # GGUF also names GatedDeltaNet input projections attn_qkv/attn_gate.
     ("attention (incl. GDN qkv/gate)", r"(attn|attention|self_attn|indexer|\.q_proj|\.k_proj|"
                                        r"\.v_proj|\.o_proj)"),
     ("dense FFN", r"(ffn_|\.mlp\.)"),
-    ("token embedding", r"(token_embd|embed_tokens|wte)"),
-    ("output head", r"(^output\.|lm_head)"),
+    ("token embedding", r"(token_embd|embed_tokens|token_embedding|wte)"),
+    ("output head", r"(^output\.|lm_head|output_head)"),
     ("MTP / nextn", r"(nextn|mtp)"),
 ]
 
 
 def category(name: str) -> str:
-    n = name.lower()
+    n = name.lower().replace("/", ".")  # NInfer logical names use slashes
     for label, pattern in CATEGORIES:
         if re.search(pattern, n):
             return label
@@ -291,6 +334,8 @@ def scan(label: str, files: list[Source], meta_config: dict | None) -> dict:
     for src in files:
         if src.name.endswith(".gguf"):
             _meta, ts = read_gguf(src)
+        elif src.name.endswith(".ninfer"):
+            ts = read_ninfer(src)
         else:
             bits = None
             if meta_config:
@@ -311,7 +356,7 @@ def main() -> None:
     args = parser.parse_args()
 
     files = [f for f in resolve(args.source)
-             if f.name.endswith((".gguf", ".safetensors"))]
+             if f.name.endswith((".gguf", ".safetensors", ".ninfer"))]
     config = None
     for f in resolve(args.source) if args.source.startswith(("ms:", "hf:")) else []:
         if f.name == "config.json":
@@ -323,7 +368,7 @@ def main() -> None:
     for f in files:
         variants[variant_of(f.name)].append(f)
     if not variants:
-        sys.exit("no .gguf or .safetensors files found")
+        sys.exit("no .gguf, .safetensors or .ninfer files found")
     if len(variants) > 1 and not args.variant and not args.all:
         print("variants (pass one as the second argument, or --all):")
         for name, fs in sorted(variants.items()):

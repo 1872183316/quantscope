@@ -32,6 +32,8 @@ python quantscope.py /data/models/xxx                                # 本地文
 ## 支持的格式
 
 - **GGUF**（llama.cpp / ik_llama.cpp，包括多分片文件）；
+- **NInfer v3 `.ninfer`**：读取文件开头的目录 JSON，按逻辑参数（例如每个专家的 gate/up/down）
+  统计存储格式和实际字节；多个参数共用一个存储对象时，按各自占的元素比例分摊字节。
 - **safetensors**：BF16/FP16/FP8 直接按数据类型计算。GPTQ/AWQ 等打包的整数权重，按
   `config.json` 里 `quantization_config` 的 bit 数换算出真实参数量，缩放因子、零点等附加数据
   计入字节数，所以得出的是"含开销"的实际 bit/权重。
@@ -49,6 +51,9 @@ python quantscope.py /data/models/xxx                                # 本地文
 | UD-Q4_K_XL | 111.3 GB | 5.10（Q5 档） |
 | UD-Q5_K_XL | 158.3 GB | 6.51（Q6 档） |
 | UD-Q6_K_XL | 169.2 GB | 7.24（Q6 档） |
+
+NInfer 转换的 `/data/qwen3_8_flash_next.ninfer`（108.02 GB）：路由专家 4.58 bit/权重
+（Q4_G64 62%，Q5_G64 38%，属 Q4 档），n-gram 表 5.25 bit，其余投影约 8.5 bit，输出头 6.25 bit。
 
 ## 局限
 
