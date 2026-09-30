@@ -11,7 +11,7 @@ Examples:
   python quantscope.py ms:unsloth/Qwen3.8-Flash-Next-GGUF UD-Q4_K_XL   # one variant
   python quantscope.py ms:unsloth/Qwen3.8-Flash-Next-GGUF --all        # compare all variants
   python quantscope.py hf:Qwen/Qwen3-30B-A3B-GPTQ-Int4
-  python quantscope.py /data/model-00001-of-00003.gguf
+  python quantscope.py models/model-00001-of-00003.gguf
 """
 
 from __future__ import annotations

@@ -1,63 +1,74 @@
 # quantscope
 
-一键查清大模型量化版本的**真实**精度，不用下载模型。
+English | [中文](README.zh-CN.md)
 
-模型文件名里的 `IQ4_XS`、`Q4_K_XL` 只是制作者起的配方名。每个张量实际用什么格式存储、占多少字节，
-都写在文件开头的头部里。quantscope 只用 HTTP 范围请求读取每个文件开头的几 MB，就能算出：
+Find the **real** precision of a quantized LLM without downloading it.
 
-- 每一类权重（路由专家、共享专家、注意力、线性注意力/SSM、嵌入表、输出头……）的参数量、
-  大小和**实际每个权重多少 bit**；
-- 各类存储格式在其中的占比（例如 `Q4_K 58%, Q5_1 35%`）；
-- 路由专家实际属于 Q1～Q8 的哪一档。
+Names such as `IQ4_XS` or `Q4_K_XL` are only the maker's recipe label. The storage format and byte
+size of every tensor are written in each file's header. quantscope reads just the first few MB of
+each file with HTTP range requests and reports:
 
-张量大小是用头部里的偏移量直接算出来的，所以 ik_llama.cpp 等分支新增的量化类型也能算准
-（类型名会显示为 `type#N`）。
+- for every weight class (routed experts, shared experts, attention, linear attention/SSM,
+  embeddings, output head, …): parameter count, size and the **actual bits per weight**;
+- the share of each storage type within the class (e.g. `Q4_K 58%, Q5_1 35%`);
+- which Q1–Q8 tier the routed experts really fall into.
 
-## 用法
+Tensor sizes are computed from the offsets in the header, so quantization types added by forks
+such as ik_llama.cpp are measured correctly as well (shown as `type#N`).
 
-只依赖 Python 3.10+ 标准库。
+## Usage
+
+Only the Python 3.10+ standard library is needed.
 
 ```bash
-python quantscope.py ms:unsloth/Qwen3.8-Flash-Next-GGUF              # 列出仓库里的所有版本
-python quantscope.py ms:unsloth/Qwen3.8-Flash-Next-GGUF UD-Q4_K_XL   # 查一个版本
-python quantscope.py ms:unsloth/Qwen3.8-Flash-Next-GGUF --all        # 对比所有版本
+python quantscope.py ms:unsloth/Qwen3.8-Flash-Next-GGUF              # list the variants in a repository
+python quantscope.py ms:unsloth/Qwen3.8-Flash-Next-GGUF UD-Q4_K_XL   # inspect one variant
+python quantscope.py ms:unsloth/Qwen3.8-Flash-Next-GGUF --all        # compare every variant
 python quantscope.py hf:Qwen/Qwen3-30B-A3B-GPTQ-Int4                 # Hugging Face
-python quantscope.py https://example.com/model-00001-of-00004.gguf   # 直接给 URL
-python quantscope.py /data/models/xxx                                # 本地文件或目录
+python quantscope.py https://example.com/model-00001-of-00004.gguf   # a direct URL
+python quantscope.py models/xxx                                      # a local file or directory
 ```
 
-`ms:` 是 ModelScope，`hf:` 是 Hugging Face。连不上 huggingface.co 时，可以设置
-`HF_ENDPOINT=https://hf-mirror.com`。
+`ms:` is ModelScope and `hf:` is Hugging Face. If huggingface.co is unreachable, set
+`HF_ENDPOINT=https://hf-mirror.com`.
 
-## 支持的格式
+## Supported formats
 
-- **GGUF**（llama.cpp / ik_llama.cpp，包括多分片文件）；
-- **NInfer v3 `.ninfer`**：读取文件开头的目录 JSON，按逻辑参数（例如每个专家的 gate/up/down）
-  统计存储格式和实际字节；多个参数共用一个存储对象时，按各自占的元素比例分摊字节。
-- **safetensors**：BF16/FP16/FP8 直接按数据类型计算。GPTQ/AWQ 等打包的整数权重，按
-  `config.json` 里 `quantization_config` 的 bit 数换算出真实参数量，缩放因子、零点等附加数据
-  计入字节数，所以得出的是"含开销"的实际 bit/权重。
+- **GGUF** (llama.cpp / ik_llama.cpp, including multi-part files);
+- **NInfer v3 `.ninfer`**: reads the directory JSON at the start of the file and reports storage
+  formats and actual bytes per logical parameter (e.g. each expert's gate/up/down); when several
+  parameters share one storage object, bytes are split by their element share;
+- **safetensors**: BF16/FP16/FP8 are measured from the dtype. For packed integer weights such as
+  GPTQ/AWQ, the bit width in `config.json`'s `quantization_config` recovers the real parameter
+  count, and scales, zero points and other side data count toward the bytes, so the result is the
+  actual bits per weight including overhead.
 
-## 示例：Qwen3.8-Flash-Next 的 unsloth GGUF（2026-09-30）
+## Example: unsloth GGUFs of Qwen3.8-Flash-Next (2026-09-30)
 
-| 版本名 | 大小 | 路由专家实际 bit/权重 |
+| Variant | Size | Routed-expert bits/weight |
 |---|---|---|
-| UD-IQ1_S | 72.5 GB | 2.64（Q2 档） |
-| UD-IQ1_M | 74.5 GB | 2.77（Q2 档） |
-| UD-Q2_K_XL | 78.9 GB | 3.05（Q3 档） |
-| UD-IQ3_XXS | 82.0 GB | 3.22（Q3 档） |
-| UD-Q3_K_XL | 90.0 GB | 3.70（Q3 档） |
-| UD-IQ4_XS | 93.7 GB | 3.94（Q4 档） |
-| UD-Q4_K_XL | 111.3 GB | 5.10（Q5 档） |
-| UD-Q5_K_XL | 158.3 GB | 6.51（Q6 档） |
-| UD-Q6_K_XL | 169.2 GB | 7.24（Q6 档） |
+| UD-IQ1_S | 72.5 GB | 2.64 (Q2 tier) |
+| UD-IQ1_M | 74.5 GB | 2.77 (Q2 tier) |
+| UD-Q2_K_XL | 78.9 GB | 3.05 (Q3 tier) |
+| UD-IQ3_XXS | 82.0 GB | 3.22 (Q3 tier) |
+| UD-Q3_K_XL | 90.0 GB | 3.70 (Q3 tier) |
+| UD-IQ4_XS | 93.7 GB | 3.94 (Q4 tier) |
+| UD-Q4_K_XL | 111.3 GB | 5.10 (Q5 tier) |
+| UD-Q5_K_XL | 158.3 GB | 6.51 (Q6 tier) |
+| UD-Q6_K_XL | 169.2 GB | 7.24 (Q6 tier) |
 
-NInfer 转换的 `/data/qwen3_8_flash_next.ninfer`（108.02 GB）：路由专家 4.58 bit/权重
-（Q4_G64 62%，Q5_G64 38%，属 Q4 档），n-gram 表 5.25 bit，其余投影约 8.5 bit，输出头 6.25 bit。
+`qwen3_8_flash_next.ninfer` (108.02 GB) converted by
+[NInfer-Offload](https://github.com/1872183316/ninfer-offload): routed experts 4.58 bits/weight
+(Q4_G64 62%, Q5_G64 38%, Q4 tier), n-gram table 5.25 bits, other projections about 8.5 bits,
+output head 6.25 bits.
 
-## 局限
+## Limitations
 
-- 权重分类靠张量名匹配。GGUF 里 GatedDeltaNet 的输入投影也叫 `attn_qkv`/`attn_gate`，
-  因此归在"注意力（含 GDN qkv/gate）"一组。
-- NVFP4/MXFP4 等打包成 U8 的 safetensors，如果 `config.json` 里没有写 bit 数，
-  默认按 4 bit 换算。
+- Weights are classified by tensor name. In GGUF the GatedDeltaNet input projections are also
+  called `attn_qkv`/`attn_gate`, so they are grouped under "attention (incl. GDN qkv/gate)".
+- For NVFP4/MXFP4 and similar formats packed as U8 in safetensors, 4 bits are assumed when
+  `config.json` does not state the bit width.
+
+## License
+
+Apache-2.0, see [LICENSE](LICENSE).
