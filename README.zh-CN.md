@@ -66,4 +66,4 @@ python quantscope.py models/xxx                                      # 本地文
 
 ## 许可证
 
-Apache-2.0，见 [LICENSE](LICENSE)。
+双许可证：[MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE)，使用者任选其一。

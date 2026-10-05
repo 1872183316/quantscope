@@ -71,4 +71,4 @@ output head 6.25 bits.
 
 ## License
 
-Apache-2.0, see [LICENSE](LICENSE).
+Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
